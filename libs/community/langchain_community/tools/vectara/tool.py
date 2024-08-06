@@ -17,6 +17,50 @@ class VectaraInput(BaseModel):
     query: str = Field(description="The input query from the user")
 
 
+def build_query_config(
+        num_results: int,
+        n_sentences_before: int,
+        n_sentences_after: int,
+        metadata_filter: str,
+        lambda_val: float,
+        reranker: str,
+        rerank_k: int,
+        mmr_diversity_bias: float,
+        enable_summarizer: bool,
+        summarizer_prompt_name: Optional[str] = None,
+        summary_num_results: Optional[int] = None,
+        summary_response_lang: Optional[str] = None,
+) -> VectaraQueryConfig:
+    """
+    Creates the VectaraQueryConfig object for Vectara tools using the given query parameters.
+    """
+
+    if enable_summarizer:
+        summary_config = SummaryConfig(
+            is_enabled=True,
+            max_results = summary_num_results,
+            prompt_name=summarizer_prompt_name,
+            response_lang=summary_response_lang,
+        )
+    else:
+        summary_config = SummaryConfig(is_enabled=False)
+
+    rerank_config = RerankConfig(
+        reranker=reranker,
+        rerank_k = rerank_k,
+        mmr_diversity_bias=mmr_diversity_bias,
+    )
+
+    return VectaraQueryConfig(
+        k = num_results,
+        lambda_val = lambda_val,
+        filter = metadata_filter,
+        n_sentence_before = n_sentences_before,
+        n_sentence_after = n_sentences_after,
+        rerank_config = rerank_config,
+        summary_config = summary_config,
+        )
+
 class VectaraRAG(BaseTool):
     "Tool that queries a Vectara corpus."
 
@@ -79,27 +123,19 @@ class VectaraRAG(BaseTool):
             vectara_api_key=vectara_api_key,
         )
 
-        summary_config = SummaryConfig(
-            is_enabled=True,
-            max_results = summary_num_results,
-            prompt_name=summarizer_prompt_name,
-            response_lang=summary_response_lang,
-        )
-
-        rerank_config = RerankConfig(
+        query_config = build_query_config(
+            num_results = num_results,
+            n_sentences_before=n_sentences_before,
+            n_sentences_after=n_sentences_after,
+            metadata_filter=metadata_filter,
+            lambda_val=lambda_val,
             reranker=reranker,
-            rerank_k = rerank_k,
+            rerank_k=rerank_k,
             mmr_diversity_bias=mmr_diversity_bias,
-        )
-
-        query_config = VectaraQueryConfig(
-            k = num_results,
-            lambda_val = lambda_val,
-            filter = metadata_filter,
-            n_sentence_before = n_sentences_before,
-            n_sentence_after = n_sentences_after,
-            rerank_config = rerank_config,
-            summary_config = summary_config,
+            enable_summarizer=True,
+            summarizer_prompt_name=summarizer_prompt_name,
+            summary_num_results=summary_num_results,
+            summary_response_lang=summary_response_lang,
         )
 
         self.rag = vectara.as_rag(query_config)
@@ -116,14 +152,18 @@ class VectaraRAG(BaseTool):
 
         response = self.rag.invoke(query)
         
+        # NEED TO FIGURE OUT HOW WE WANT TO FORMAT THE CITATION_METADATA
+        # Currently, we just give the metadata for each document (See Jupyter Notebook to see output options from Langchain RAG)
         if self.include_citations:
             return {
-                "summary": response['answer'],
-                "citations": response['context']
+                "response": response['answer'],
+                "citation_metadata": [doc[0].metadata for doc in response['context']],
+                "factual_consistency": response['fcs']
             }
         else:
             return {
-                "summary": response['answer']
+                "response": response['answer'],
+                "factual_consistency": response['fcs']
             }
         
 
@@ -180,19 +220,16 @@ class VectaraRetriever(BaseTool):
             vectara_api_key=vectara_api_key,
         )
 
-        rerank_config = RerankConfig(
+        query_config = build_query_config(
+            num_results = num_results,
+            n_sentences_before=n_sentences_before,
+            n_sentences_after=n_sentences_after,
+            metadata_filter=metadata_filter,
+            lambda_val=lambda_val,
             reranker=reranker,
-            rerank_k = rerank_k,
+            rerank_k=rerank_k,
             mmr_diversity_bias=mmr_diversity_bias,
-        )
-
-        query_config = VectaraQueryConfig(
-            k = num_results,
-            lambda_val = lambda_val,
-            filter = metadata_filter,
-            n_sentence_before = n_sentences_before,
-            n_sentence_after = n_sentences_after,
-            rerank_config = rerank_config,
+            enable_summarizer=False,
         )
 
         self.retriever = vectara.as_retriever(config=query_config)
